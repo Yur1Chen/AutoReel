@@ -111,14 +111,14 @@ tack-core = { git = "https://github.com/Yur1Chen/Tack", rev = "<同一个提交>
 
 1. 打 tag 前先跑 `pwsh scripts/build-plugin.ps1`；
 2. 把 `dist/auto-reel-<ver>.tgz` 传成 Release 资产，**同时传一份改名成 `auto-reel.tgz`**；
-3. 用户填：`https://github.com/<owner>/<repo>/releases/latest/download/auto-reel.tgz`。
+3. 用户填：`https://github.com/Yur1Chen/AutoReel/releases/latest/download/auto-reel.tgz`。
 
 包是自包含的（engine + exe + models），装完 `/autoreel/api/health` 全绿。
 这条路**当前就能用**，不依赖 §2 的任何改动。
 
 **B. git 地址直装 —— 只适合开发者**
 
-- 形式：`github:<owner>/<repo>#<40 位提交>&path:/plugin`（管理器认 `path:` 子目录片段）。
+- 形式：`github:Yur1Chen/AutoReel#<40 位提交>&path:/plugin`（管理器认 `path:` 子目录片段）。
 - 障碍：装进 profile 的只有 `plugin/`，里面没有 `engine/`、`bin/`、`models/`；
   而 [plugin/index.js:68](../plugin/index.js#L68) 的回落是 `<包>/../scripts`，安装后指向
   `node_modules/@local`，不存在 → health 的 `script`/`ocr`/`models` 三项会红。
@@ -169,7 +169,7 @@ git push origin main --tags
 #    同一份复制成 auto-reel.tgz   ← 让 /releases/latest/download/auto-reel.tgz 成为稳定地址
 
 # 5. 验证"填地址即装"
-#    插件页 → 添加插件 → https://github.com/<owner>/<repo>/releases/latest/download/auto-reel.tgz
+#    插件页 → 添加插件 → https://github.com/Yur1Chen/AutoReel/releases/latest/download/auto-reel.tgz
 #    装完看 /autoreel/api/health 是否全绿，再真剪一条
 ```
 
@@ -180,7 +180,7 @@ git push origin main --tags
    打包自动带 `LICENSE-APACHE` / `NOTICE` / `THIRD_PARTY.md`（§2.2）。
 3. **发不发 npm**：发 → `private` 去掉、真实 scope；不发 → 只走 Release（§3C）。
 4. **接受 Windows-only 吗**：当前实现依赖 `explorer`、`.exe`、`%LOCALAPPDATA%`。
-5. **仓库坐标**：`<owner>/<repo>` 定下来后填 `repository` 字段与 README 里的示例 URL。
+5. **仓库坐标**：`Yur1Chen/AutoReel` 已定，`repository` 字段已填 `repository` 字段与 README 里的示例 URL。
 
 ## 6. 建议顺序
 

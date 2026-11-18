@@ -398,8 +398,8 @@ DSH 的安装入口（`plugin_manager` 的 `install_bundle`，或插件页「添
 |---|---|---|
 | 本地目录绝对路径 | `D:\AIworks\AutoReel\plugin` | 开发用；链到仓库，改了代码刷新即生效 |
 | 本地 `.tgz` 绝对路径 | `D:\下载\auto-reel-0.1.0.tgz` | 自包含，装好即用 |
-| **HTTPS tarball URL** | `https://github.com/<owner>/<repo>/releases/latest/download/auto-reel.tgz` | 把 tgz 传到 GitHub Release 当资产，「填一个地址就装」走这条 |
-| git 地址 | `github:<owner>/<repo>#<40 位 commit>&path:/plugin` | 装 `plugin/` 子包；包内没有 `engine/`、`bin/`、`models/`，只适合开发调试 |
+| **HTTPS tarball URL** | `https://github.com/Yur1Chen/AutoReel/releases/latest/download/auto-reel.tgz` | 把 tgz 传到 GitHub Release 当资产，「填一个地址就装」走这条 |
+| git 地址 | `github:Yur1Chen/AutoReel#<40 位 commit>&path:/plugin` | 装 `plugin/` 子包；包内没有 `engine/`、`bin/`、`models/`，只适合开发调试 |
 
 机器上只需 `ffmpeg` 9（Node 由 DSH 自带；`pwsh` 7 仅在 `engine: ps` 或回落时需要）；装好后
 `/autoreel/api/health` 会逐项自检并显示当前引擎。三条路的取舍、不能直装的原因和剩余待办，
