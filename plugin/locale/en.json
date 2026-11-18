@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "AutoReel clips",
+    "description": "Cut Valorant kill highlights out of NVIDIA Instant Replay files by OCR-ing the killfeed: extract frames, read the killfeed, rebuild kill events, then trim and concatenate. The reel shows up in the chat tool card, playable and one click from its folder.",
+    "detail": "docs/DETAIL.md"
+  }
+}

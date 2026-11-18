@@ -1,0 +1,13 @@
+[package]
+name = "tack-ocr"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+description = "Vendored snapshot: PP-OCRv6_small inference (det/rec/order) from the Tack project."
+publish = false
+
+[dependencies]
+rten = { version = "0.22.1", features = ["mmap"] }
+rten-tensor = "=0.22.1"
+tack-core = { path = "../tack-core" }

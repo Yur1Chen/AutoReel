@@ -1,0 +1,72 @@
+{
+  "at": "2026-11-18T04:08:13.182Z",
+  "failed": 0,
+  "report": [
+    {
+      "source": "Valorant 2025.09.14 - 10.48.16.04.DVR.mp4",
+      "ok": true,
+      "psSeconds": 52,
+      "jsSeconds": 8,
+      "localId": "夜色冷",
+      "kills": 5,
+      "segments": 4,
+      "reelSha256": "68CADCFBC17913FEFCBD1D0720AF6F61A776D169F3DC306717F301DA2DB99B53",
+      "diffs": []
+    },
+    {
+      "source": "Valorant 2025.09.21 - 17.16.07.08.DVR.mp4",
+      "ok": true,
+      "psSeconds": 54,
+      "jsSeconds": 7,
+      "localId": "夜色冷",
+      "kills": 5,
+      "segments": 2,
+      "reelSha256": "BC3885A3667F866C3ABCBA0C13B19A87AC256E3BADFCC6631D65BD6066797B9E",
+      "diffs": []
+    },
+    {
+      "source": "Valorant 2026.10.13 - 19.52.39.02.DVR.mp4",
+      "ok": true,
+      "psSeconds": 56,
+      "jsSeconds": 7,
+      "localId": "比奇堡恶霸",
+      "kills": 7,
+      "segments": 3,
+      "reelSha256": "379269E4540A2881F650686C0D15EFDE600C15CB886D33F974EFF65802415E4B",
+      "diffs": []
+    },
+    {
+      "source": "Valorant 2026.11.11 - 23.18.09.02.DVR.mp4",
+      "ok": true,
+      "psSeconds": 51,
+      "jsSeconds": 4,
+      "localId": "乐邦詹士",
+      "kills": 4,
+      "segments": 2,
+      "reelSha256": "7C26D855177846238EDD7EB25A97CFF4F73DD203BD611FFA6ED6CCAEF1A247C5",
+      "diffs": []
+    },
+    {
+      "source": "Valorant 2026.11.11 - 23.18.37.03.DVR.mp4",
+      "ok": true,
+      "psSeconds": 15,
+      "jsSeconds": 3,
+      "localId": "乐邦詹士",
+      "kills": 3,
+      "segments": 2,
+      "reelSha256": "AA683EAD04D8D9F3A8E5BA903702296879D202453DE583F10AF4393E962462F8",
+      "diffs": []
+    },
+    {
+      "source": "Valorant 2026.11.11 - 23.21.53.04.DVR.mp4",
+      "ok": true,
+      "psSeconds": 56,
+      "jsSeconds": 9,
+      "localId": "乐邦詹士",
+      "kills": 5,
+      "segments": 4,
+      "reelSha256": "08BA0D7A95FE91B933506325870CDB5315E3E11358AF1C689476180C9D86070C",
+      "diffs": []
+    }
+  ]
+}

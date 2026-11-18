@@ -1,0 +1,4 @@
+- insert:
+    - id: auto-reel
+      name: '@local/auto-reel'
+      config: {}

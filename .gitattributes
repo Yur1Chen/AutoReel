@@ -1,0 +1,16 @@
+# 统一按 LF 存文本，避免 Windows 提交整片 diff
+* text=auto eol=lf
+
+# 二进制：不要让 Git 做换行转换
+*.mp4 binary
+*.DVR binary
+*.tgz binary
+*.exe binary
+*.rten binary
+*.png binary
+*.jpg binary
+*.ico binary
+
+# 文档与脚本在 GitHub 上的语言统计
+*.md linguist-documentation
+/docs/** linguist-documentation

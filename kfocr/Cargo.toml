@@ -1,0 +1,22 @@
+[package]
+name = "kfocr"
+version = "0.1.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+# Tack 目前未完成、未公开：仓库里 vendor 了一份最小快照（见 third_party/README.md），
+# 这样 clone 下来就能直接构建。Tack 公开后可换回 git/crates.io 依赖，kfocr 代码不用动。
+tack-ocr = { path = "../third_party/tack-ocr" }
+tack-core = { path = "../third_party/tack-core" }
+image = "0.25"
+
+[profile.dev]
+opt-level = 1
+
+# 文档 §8 的 release 配置：opt3 + lto + 单 codegen unit，目标是 3-4× 单条识别速度
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

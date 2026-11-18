@@ -1,0 +1,10 @@
+[package]
+name = "tack-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+description = "Minimal stand-in for tack-core: only the punct module that tack-ocr needs."
+publish = false
+
+[dependencies]

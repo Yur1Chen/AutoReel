@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "AutoReel 击杀集锦",
+    "description": "从 NVIDIA 即时回放里按击杀信息栏 OCR 自动剪出 Valorant 击杀集锦：抽帧、识别、重建击杀事件、切片拼接；成片直接出现在对话的工具卡片里，可播放、可打开目录。",
+    "detail": "docs/DETAIL.md"
+  }
+}

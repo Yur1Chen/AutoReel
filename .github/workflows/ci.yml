@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  js-tests:
+    name: JS 合成用例 / Host / Client
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # 只跑不依赖录像与 OCR 的用例：事件重建、设置接口、客户端注册
+      - name: test-events
+        run: node scripts/test-events.mjs
+      - name: test-host
+        run: node scripts/test-host.mjs
+      - name: test-client
+        run: node scripts/test-client.mjs
+
+  kfocr-build:
+    name: 构建 kfocr（证明源码可构建）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kfocr
+      - name: cargo build --release
+        run: cargo build --release --manifest-path kfocr/Cargo.toml
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kfocr
+          path: kfocr/target/release/kfocr.exe
+          if-no-files-found: error
