@@ -143,7 +143,7 @@ tack-core = { git = "https://github.com/Yur1Chen/Tack", rev = "<同一个提交>
 
 ### 还要做
 
-- **首图**：README 加一张工具卡片或面板截图（现在全是文字；本机没有浏览器截图能力，需要你自己截）。
+- **首图（可选）**：想加就补一张工具卡片/面板截图；不加也不影响发布，README 已用文字说明卡片里能看到什么。
 - **元数据**：`plugin/package.json` 补 `repository` / `homepage` / `bugs`；GitHub 侧填描述与 Topics。
 - **SECURITY.md**：插件在本机开了 `/autoreel/*` HTTP 路由，只校验来源、不鉴权，需要显式写明。
 - **隐私**：`out/` 已排除；README 金样表里有真实玩家 ID（`乐邦詹士` 等），要更保守可脱敏。
@@ -194,7 +194,7 @@ git push origin main --tags
 |---|---|
 | D1 | ~~vendor Tack 最小集~~ **已完成**：`third_party/` + 依赖切换 + 构建 1m43s + 金样 SHA256 一致（§2） |
 | D2 | ~~确认模型许可~~ **已完成**（Apache-2.0，见 §2.2）；剩下：模型目录不再写死（§2.1）+ 重建 + 金样复验 |
-| D3 | ~~CI~~ **已完成**；剩下：首图、元数据、`SECURITY.md`（§4）；打 tag、传 Release（§3A） |
+| D3 | ~~CI~~、~~`SECURITY.md`~~、~~元数据~~ **已完成**；首图降级为可选；剩下推 tag / 确认 Release 资产（§3A） |
 | D4 | 验证"从 Release URL 安装"全流程（health 全绿 + 真剪一条），README 收尾 |
 
 ## 附：本次已验证的事实
