@@ -150,8 +150,14 @@ tack-core = { git = "https://github.com/Yur1Chen/Tack", rev = "<同一个提交>
 - **示例路径**：README/PLAN 里多处 `D:\AIworks\...` 是作者机器路径，建议标注"示例"或换成
   `<你的目录>`。
 
-### 发布清单（本机执行）
+### 已知坑
 
+**从 `link:` 安装换成 tgz / Release URL 时，pnpm 会顺着 junction 删掉链接目标的内容。**
+2026-11-18 实测：把 profile 的 `link:D:/AIworks/AutoReel/plugin` 换成 Release URL 后，
+仓库里的 `plugin/` 被清空（11 个文件全没），`git restore -- plugin` 才恢复。
+换装前先 `git status` 确认干净（或备份），或者在换装前先 `remove_bundle`。
+
+### 发布清单（本机执行）
 ```powershell
 # 1. 确认工作区干净、测试通过
 node scripts\test-events.mjs; node scripts\test-host.mjs; node scripts\test-client.mjs

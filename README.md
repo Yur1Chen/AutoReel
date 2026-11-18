@@ -355,6 +355,11 @@ Host 半的改动要重启 DSH 才生效（`node scripts/test-plugin.mjs [--spaw
     modelsDir: 'D:\AIworks\Tack\target\release\models'
 ```
 
+> ⚠️ **从「源码目录（link）」换成「tgz / Release URL」安装时，先备份 `plugin/`。**
+> 实测 pnpm 会把旧的 `link:` 依赖替换成真实包，替换时顺着 junction 把**链接目标目录的内容删掉**
+> ——也就是仓库里的 `plugin/` 会被清空（2026-11-18 实际踩到，用 `git restore -- plugin` 恢复）。
+> 要么先 `remove_bundle`，要么先提交/备份再装。
+
 **用法**：在对话里说「把最近一条回放剪一下」。模型调用 `auto_reel`：
 
 | 参数 | 说明 |
