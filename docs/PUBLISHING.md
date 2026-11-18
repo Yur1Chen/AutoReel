@@ -20,7 +20,7 @@
 | [.gitattributes](../.gitattributes) | 文本统一 LF；`mp4/DVR/tgz/exe/rten` 标二进制 |
 | [plugin/package.json](../plugin/package.json) | 已补 `license: MIT`、`engines.dsh: ^0.2.2-rc.3`（安装时会检查） |
 | [docs/parity-report.json](parity-report.json) | 金样比对报告入库，README 不再引用不入库的 `out/_parity/` |
-| [README](../README.md#L367) | 补了「四种安装写法」「仓库里不放什么」「公开仓库的已知限制」 |
+| [README](../README.md) | 精简到 109 行：功能、安装、运行前提、用法、原理概览、文档索引、已知限制 |
 | [scripts/build-plugin.ps1](../scripts/build-plugin.ps1) | 能产出自包含 tgz（engine + `bin/kfocr.exe` + `models/`，约 27 MB） |
 | [third_party/](../third_party/README.md) | Tack 源码最小快照（`tack-ocr` + `punct`），双许可全文随目录，同步步骤写在 README |
 | [THIRD_PARTY.md](../THIRD_PARTY.md) | 第三方组件与许可登记：代码快照、模型 SHA256、依赖清单 |
@@ -146,7 +146,7 @@ tack-core = { git = "https://github.com/Yur1Chen/Tack", rev = "<同一个提交>
 - **首图（可选）**：想加就补一张工具卡片/面板截图；不加也不影响发布，README 已用文字说明卡片里能看到什么。
 - **元数据**：`plugin/package.json` 补 `repository` / `homepage` / `bugs`；GitHub 侧填描述与 Topics。
 - **SECURITY.md**：插件在本机开了 `/autoreel/*` HTTP 路由，只校验来源、不鉴权，需要显式写明。
-- **隐私**：`out/` 已排除；README 金样表里有真实玩家 ID（`乐邦詹士` 等），要更保守可脱敏。
+- **隐私**：`out/` 已排除；[docs/ENGINE-NOTES.md](ENGINE-NOTES.md) 的金样表里有真实玩家 ID（`乐邦詹士` 等），要更保守可脱敏。
 - **示例路径**：README/PLAN 里多处 `D:\AIworks\...` 是作者机器路径，建议标注"示例"或换成
   `<你的目录>`。
 
