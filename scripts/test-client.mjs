@@ -34,7 +34,9 @@ const React = {
   useState: (v) => [v, () => {}],
   useEffect: () => {},
   useMemo: (fn) => fn(),
-  useCallback: (fn) => fn
+  useCallback: (fn) => fn,
+  useRef: (v) => ({ current: v }),
+  Fragment: 'Fragment'
 }
 const mod = definition.factory((name) => {
   if (name === 'react') return React

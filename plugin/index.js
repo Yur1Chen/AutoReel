@@ -359,14 +359,25 @@ export function apply (ctx, config) {
 
     let pipeline = startPipeline(initialEngine)
 
+    /** 面板上的「取消」：置取消标记并杀掉当前引擎进程（回落重试后仍指最新一次）。 */
+    rec.cancelRun = () => {
+      rec.canceled = true
+      pipeline.cancel()
+    }
+
     /** 进程结束后落账；两种引擎走同一套状态机。 */
     const settle = ({ code, error }) => {
       rec.finishedAt = Date.now()
       if (rec.status !== 'completed') {
         rec.status = rec.canceled ? 'killed' : 'failed'
-        const tail = rec.log.filter((line) => line.trim()).slice(-1)[0]
-        rec.error = error || `引擎退出码 ${code}${tail ? `：${tail}` : ''}`
-        rec.progress = rec.error
+        if (rec.canceled) {
+          rec.progress = '已取消'
+          rec.error = null
+        } else {
+          const tail = rec.log.filter((line) => line.trim()).slice(-1)[0]
+          rec.error = error || `引擎退出码 ${code}${tail ? `：${tail}` : ''}`
+          rec.progress = rec.error
+        }
       }
       if (activeId === rec.id) activeId = null
       if (rec.status === 'completed' && rec.output) {
@@ -395,7 +406,7 @@ export function apply (ctx, config) {
       rec.engine = 'ps'
       rec.stage = null
       rec.pct = 0
-      rec.progress = 'JS 引擎失败，回落到 PS 引擎'
+      rec.progress = 'JS 引擎未成功，改用 PowerShell 重试'
       rec.localId = request.localId
       rec.media = null
       rec.error = null
@@ -776,9 +787,18 @@ export function apply (ctx, config) {
   })
 
   route('prefix', RUNS_ROUTE, (req, res) => {
-    const id = decodeURIComponent(new URL(req.url, 'http://localhost').pathname.slice(RUNS_ROUTE.length).replace(/^\/+/, ''))
-    const rec = runs.get(id)
+    const suffix = decodeURIComponent(new URL(req.url, 'http://localhost').pathname.slice(RUNS_ROUTE.length).replace(/^\/+/, ''))
+    const [rawId, action] = suffix.split('/')
+    const rec = runs.get(rawId)
     if (!rec) { sendJson(res, 404, { error: 'job not found' }); return }
+    if (action === 'cancel') {
+      if (req.method !== 'POST') { sendText(res, 405, 'method not allowed'); return }
+      // 面板会带一个空的 JSON 体；这里不读内容，直接排空，避免 keep-alive 连接残留
+      if (typeof req.resume === 'function') req.resume()
+      if (rec.status === 'running' && typeof rec.cancelRun === 'function') rec.cancelRun()
+      sendJson(res, 200, { ok: true, run: publicRun(rec) })
+      return
+    }
     sendJson(res, 200, publicRun(rec))
   })
 
