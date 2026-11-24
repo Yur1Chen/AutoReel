@@ -47,6 +47,13 @@ export function buildCommand (engine, options) {
   if (options.ocrExe) args.push('--ocr', options.ocrExe)
   if (options.workDir) args.push('--work', options.workDir)
   if (options.keepWork) args.push('--keep-work')
+  // 速度开关只对 JS 引擎有效（highlight.ps1 没有这些参数），且默认档一律不传，
+  // 这样参数里出现什么就代表用户/配置真的改了什么。
+  if (options.extract && options.extract !== 'full') args.push('--extract', options.extract)
+  if (options.encoder && options.encoder !== 'libx264') args.push('--encoder', options.encoder)
+  if (options.fastCopy) args.push('--fast-copy')
+  if (options.cutJobs > 1) args.push('--cut-jobs', String(options.cutJobs))
+  if (options.ocrJobs > 0) args.push('--ocr-jobs', String(options.ocrJobs))
   return { command: options.nodePath || process.execPath, args }
 }
 
@@ -73,6 +80,11 @@ function childEnv (engine, options, command) {
  * @param {string} [options.ocrExe]
  * @param {string} [options.workDir]
  * @param {boolean} [options.keepWork]
+ * @param {'full'|'keyframe'} [options.extract]
+ * @param {'libx264'|'nvenc'|'auto'} [options.encoder]
+ * @param {boolean} [options.fastCopy]
+ * @param {number} [options.cutJobs]
+ * @param {number} [options.ocrJobs]
  * @param {NodeJS.ProcessEnv} [options.env]
  * @param {(event: object) => void} handlers.onEvent
  * @param {(line: string) => void} handlers.onLog

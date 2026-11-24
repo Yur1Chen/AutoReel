@@ -33,6 +33,21 @@
  *   --keep-work            跑完不删中间产物
  *   --machine              stdout 只输出 `HC <json>` 事件行，人读信息走 stderr
  *   --roi "x,w,h,y1,y2,y3" 击杀条 ROI override（源视频像素），默认 auto
+ *
+ * 速度相关（详见 docs/BENCHMARKS.md 的实测结论，都是可关的开关，默认保持既有行为）：
+ *   --extract <full|keyframe>  抽帧策略。full=整片解码后按 fps 取样（默认，帧级精确）；
+ *                              keyframe=GOP 允许时只解关键帧（快 7×，但取样帧可能相差
+ *                              最多一个取样间隔，成片时间戳同样有这点偏差）
+ *   --hwaccel <off|cuda|d3d11va> 硬解。仅对 --extract keyframe 有明显收益；
+ *                              full 模式下实测比软解更慢（每帧都要把 1440p 拷回内存），默认 off
+ *   --encoder <libx264|nvenc|auto> 切片编码器，默认 libx264（与 PS 引擎逐字节一致）；
+ *                              nvenc 快约 1.4×，但同画质文件大约 1.8×
+ *   --fast-copy                切片走 -c copy 无损直剪（快到 0.2s，段落首尾对齐到关键帧，
+ *                              间隔 0.5s 的素材误差 ≤0.5s）
+ *   --cut-jobs <n>             切片并发数，默认 1（实测 4 路只快 0.2s：x264 已经吃满核心）
+ *   --no-prefilter             kfocr 前置空槽过滤（A/B 用，关掉会慢很多）
+ *   --no-dedup                 kfocr 帧间去重（A/B 用）
+ *   --ocr-jobs <n>             同时跑 n 个 kfocr 分块进程，默认 auto（核数/4，最多 4）
  */
 
 import fs from 'node:fs/promises'
@@ -75,7 +90,15 @@ function parseArgs (argv) {
     machine: false,
     roi: 'auto',
     ffmpeg: 'ffmpeg',
-    ffprobe: 'ffprobe'
+    ffprobe: 'ffprobe',
+    extract: 'full',
+    hwaccel: 'off',
+    encoder: 'libx264',
+    fastCopy: false,
+    cutJobs: 1,
+    ocrJobs: 0, // 0 = auto（按核数决定并发分块数）
+    prefilter: true,
+    dedup: true
   }
   const takesValue = {
     '--source': 'source',
@@ -90,7 +113,12 @@ function parseArgs (argv) {
     '--chunk-size': 'chunkSize',
     '--roi': 'roi',
     '--ffmpeg': 'ffmpeg',
-    '--ffprobe': 'ffprobe'
+    '--ffprobe': 'ffprobe',
+    '--extract': 'extract',
+    '--hwaccel': 'hwaccel',
+    '--encoder': 'encoder',
+    '--cut-jobs': 'cutJobs',
+    '--ocr-jobs': 'ocrJobs'
   }
   const flags = {
     '--reuse': 'reuse',
@@ -98,16 +126,21 @@ function parseArgs (argv) {
     '--release': 'release',
     '--single-ocr': 'singleOcr',
     '--keep-work': 'keepWork',
-    '--machine': 'machine'
+    '--machine': 'machine',
+    '--fast-copy': 'fastCopy'
   }
+  const numbers = new Set(['--scan-fps', '--chunk-size', '--pre', '--post', '--cut-jobs', '--ocr-jobs'])
+  const offFlags = { '--no-prefilter': 'prefilter', '--no-dedup': 'dedup' }
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (takesValue[a]) {
       const v = argv[++i]
       if (v === undefined) throw new Error(`${a} 缺少参数`)
-      opts[takesValue[a]] = (a === '--scan-fps' || a === '--chunk-size' || a === '--pre' || a === '--post') ? Number(v) : v
+      opts[takesValue[a]] = numbers.has(a) ? Number(v) : v
     } else if (flags[a]) {
       opts[flags[a]] = true
+    } else if (offFlags[a]) {
+      opts[offFlags[a]] = false
     } else if (a === '-h' || a === '--help') {
       console.log('用法见文件头注释：node scripts/highlight.mjs --source <录像> [--release]')
       process.exit(0)
@@ -116,6 +149,11 @@ function parseArgs (argv) {
     }
   }
   if (!opts.source) throw new Error('缺少 --source <源录像>')
+  if (!['full', 'keyframe'].includes(opts.extract)) throw new Error(`--extract 需要 full 或 keyframe（收到 ${opts.extract}）`)
+  if (!['off', 'cuda', 'd3d11va'].includes(opts.hwaccel)) throw new Error(`--hwaccel 需要 off / cuda / d3d11va（收到 ${opts.hwaccel}）`)
+  if (!['libx264', 'nvenc', 'auto'].includes(opts.encoder)) throw new Error(`--encoder 需要 libx264 / nvenc / auto（收到 ${opts.encoder}）`)
+  if (!Number.isInteger(opts.cutJobs) || opts.cutJobs < 1) throw new Error('--cut-jobs 需要正整数')
+  if (!Number.isInteger(opts.ocrJobs) || opts.ocrJobs < 0) throw new Error('--ocr-jobs 需要正整数')
   return opts
 }
 
@@ -160,6 +198,40 @@ async function probeMedia (file) {
   }
   if (width <= 0 || height <= 0) throw new Error(`无法读取视频分辨率（ffprobe 失败）: ${file}`)
   return { width, height, fps }
+}
+
+// ── 抽帧策略探测（docs/BENCHMARKS.md §抽帧）───────────────────────
+// 击杀条一行停留 4–5s，所以「每秒 ≥1 个关键帧」就足以覆盖它：只解 I 帧能把解码量降到
+// 1/GOP，代价是取样帧与 fps 网格最多差一个 GOP 间隔（时间戳同理）。
+// 只读前 12 秒的包标记来估计 GOP，不必扫全片。
+async function probeGop (file) {
+  const { stdout } = await runProcess(opts.ffprobe, [
+    '-v', 'error', '-select_streams', 'v:0', '-read_intervals', '%+12',
+    '-show_entries', 'packet=flags,pts_time', '-of', 'csv=p=0', file
+  ])
+  const keys = []
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line) continue
+    const parts = line.split(',')
+    if (!parts.some(p => p.includes('K'))) continue
+    const t = parts.map(Number).find(n => Number.isFinite(n))
+    if (t !== undefined) keys.push(t)
+  }
+  if (keys.length < 8) return { gop: Number.POSITIVE_INFINITY, keys: keys.length }
+  const gaps = []
+  for (let i = 1; i < keys.length; i++) gaps.push(keys[i] - keys[i - 1])
+  gaps.sort((a, b) => a - b)
+  return { gop: gaps[Math.floor(gaps.length / 2)], keys: keys.length }
+}
+
+// 硬解能不能用：真解几帧最省事，比查 `-hwaccels` 可靠（列出来不代表驱动可用）。
+async function probeHwaccel (kind, file) {
+  try {
+    await runProcess(opts.ffmpeg, ['-v', 'error', '-hwaccel', kind, '-i', file, '-frames:v', '3', '-f', 'null', '-'])
+    return true
+  } catch {
+    return false
+  }
 }
 
 async function main () {
@@ -236,35 +308,100 @@ async function main () {
     note('   复用已有抽帧')
     emit('progress', { pct: 10, text: '复用已有抽帧' })
   } else {
-    for (let s = 0; s < slots.length; s++) await ensureDir(path.join(workDir, 'slots', String(s)))
-    const t0 = Date.now()
-    if (opts.legacyExtract) {
-      // 旧实现：每个槽位各跑一次 ffmpeg，每次都完整解码整片
-      for (let s = 0; s < slots.length; s++) {
-        await runProcess(opts.ffmpeg, [
-          '-y', '-v', 'error', '-i', source,
-          '-vf', `fps=${opts.scanFps},crop=${slotW}:${slotH}:${slotX}:${slots[s]}`,
-          path.join(workDir, 'slots', String(s), '%04d.png')
-        ])
+    const slotDirs = slots.map((_, s) => path.join(workDir, 'slots', String(s)))
+    const resetSlots = async () => {
+      for (const d of slotDirs) {
+        await fs.rm(d, { recursive: true, force: true })
+        await ensureDir(d)
       }
-    } else {
-      // 单次解码 + split=N，每条分支只裁自己那条 ROI
-      const branches = slots.map((_, i) => `[b${i}]`)
-      const graph = [`fps=${opts.scanFps},split=${slots.length}${branches.join('')}`]
-      for (let s = 0; s < slots.length; s++) {
-        graph.push(`${branches[s]}crop=${slotW}:${slotH}:${slotX}:${slots[s]}[s${s}]`)
-      }
-      const fgFile = path.join(workDir, 'fg.txt')
-      await fs.writeFile(fgFile, graph.join(';'), 'ascii')
-
-      const mapArgs = []
-      for (let s = 0; s < slots.length; s++) {
-        mapArgs.push('-map', `[s${s}]`, path.join(workDir, 'slots', String(s), '%04d.png'))
-      }
-      await runProcess(opts.ffmpeg, ['-y', '-v', 'error', '-i', source, '-/filter_complex', fgFile, ...mapArgs])
     }
+    const countFrames = async () => {
+      let n = 0
+      for (const d of slotDirs) {
+        try { n += (await fs.readdir(d)).filter(x => x.toLowerCase().endsWith('.png')).length } catch {}
+      }
+      return n
+    }
+
+    // 策略：默认整片解码（帧级精确）。keyframe 只在 GOP 够密时才值得，
+    // 而且此时硬解才有意义（软解跳帧仍要付整片 demux 的代价，但省下全部解码）。
+    let extractMode = opts.extract
+    let hw = opts.hwaccel
+    if (extractMode === 'keyframe') {
+      const { gop, keys } = await probeGop(source)
+      const maxGop = 1.25 / opts.scanFps
+      if (!Number.isFinite(gop) || gop > maxGop) {
+        extractMode = 'full'
+        note(`   !! --extract keyframe 不适用：GOP≈${Number.isFinite(gop) ? gop.toFixed(2) : '未知'}s`
+          + ` > 取样间隔 ${(1 / opts.scanFps).toFixed(2)}s（采样点 ${keys} 个），回退整片解码`)
+      } else {
+        note(`   keyframe 模式：GOP≈${gop.toFixed(2)}s（采样点 ${keys} 个），只解关键帧`)
+        if (hw === 'off') {
+          for (const kind of ['cuda', 'd3d11va']) {
+            if (await probeHwaccel(kind, source)) { hw = kind; break }
+          }
+        }
+      }
+    }
+
+    // 依次尝试「理想配置 → 退化配置」：硬解/跳帧失败都要能自动回退，别让用户直面黑屏
+    const t0 = Date.now()
+    const attempts = []
+    if (opts.legacyExtract) {
+      attempts.push({ mode: 'legacy', hw: 'off' })
+    } else if (extractMode === 'keyframe') {
+      if (hw !== 'off') attempts.push({ mode: 'keyframe', hw })
+      attempts.push({ mode: 'keyframe', hw: 'off' })
+      attempts.push({ mode: 'full', hw: 'off' })
+    } else {
+      attempts.push({ mode: 'full', hw })
+      if (hw !== 'off') attempts.push({ mode: 'full', hw: 'off' })
+    }
+
+    // 单次解码 + split=N，每条分支只裁自己那条 ROI
+    const branches = slots.map((_, i) => `[b${i}]`)
+    const graph = [`fps=${opts.scanFps},split=${slots.length}${branches.join('')}`]
+    for (let s = 0; s < slots.length; s++) {
+      graph.push(`${branches[s]}crop=${slotW}:${slotH}:${slotX}:${slots[s]}[s${s}]`)
+    }
+    const fgFile = path.join(workDir, 'fg.txt')
+    await fs.writeFile(fgFile, graph.join(';'), 'ascii')
+    const mapArgs = []
+    for (let s = 0; s < slots.length; s++) {
+      mapArgs.push('-map', `[s${s}]`, path.join(workDir, 'slots', String(s), '%04d.png'))
+    }
+
+    let done = false
+    for (const attempt of attempts) {
+      await resetSlots()
+      try {
+        if (attempt.mode === 'legacy') {
+          // 旧实现：每个槽位各跑一次 ffmpeg，每次都完整解码整片
+          for (let s = 0; s < slots.length; s++) {
+            await runProcess(opts.ffmpeg, [
+              '-y', '-v', 'error', '-i', source,
+              '-vf', `fps=${opts.scanFps},crop=${slotW}:${slotH}:${slotX}:${slots[s]}`,
+              path.join(workDir, 'slots', String(s), '%04d.png')
+            ])
+          }
+        } else {
+          const hwArgs = attempt.hw !== 'off' ? ['-hwaccel', attempt.hw] : []
+          const skipArgs = attempt.mode === 'keyframe' ? ['-skip_frame', 'nokey'] : []
+          await runProcess(opts.ffmpeg, [
+            '-y', '-v', 'error', ...hwArgs, ...skipArgs, '-i', source, '-/filter_complex', fgFile, ...mapArgs
+          ])
+        }
+        if ((await countFrames()) > 0) { done = true; break }
+        note(`   !! ${attempt.mode}${attempt.hw !== 'off' ? `+${attempt.hw}` : ''} 没有产出帧，换下一种配置`)
+      } catch (err) {
+        note(`   !! ${attempt.mode}${attempt.hw !== 'off' ? `+${attempt.hw}` : ''} 失败（${String(err.message).split('\n')[0]}），换下一种配置`)
+      }
+    }
+    if (!done) throw new Error('抽帧失败：所有解码配置都没产出帧')
+
     const extractSeconds = (Date.now() - t0) / 1000
-    note(`   抽帧耗时 ${extractSeconds.toFixed(2)}s`)
+    const frames = await countFrames()
+    note(`   抽帧耗时 ${extractSeconds.toFixed(2)}s（${frames} 张，模式 ${extractMode}${hw !== 'off' ? ` + 硬解 ${hw}` : ''}）`)
     emit('progress', { pct: 10, text: `抽帧完成 ${extractSeconds.toFixed(1)}s` })
   }
 
@@ -306,6 +443,13 @@ async function main () {
       rows.push({ t: psRound(m.t, 2), slot: m.slot, text: p[6], score: Number(p[5]), path: file })
     }
 
+    // kfocr 的前置过滤/去重默认开着（空槽不推理、连续同帧复用上一次结果）。
+    // 关掉只用于 A/B：两者都不改变「有文本的帧」的识别结果，只省掉推理次数。
+    const ocrFlags = ['--quiet', '--models', modelsDir]
+    if (!opts.prefilter) ocrFlags.push('--no-prefilter')
+    if (!opts.dedup) ocrFlags.push('--no-dedup')
+    const filterStats = { ran: 0, skipped: 0, empty: 0, dup: 0 }
+
     if (opts.singleOcr) {
       // 每帧一次进程（旧实现，用于 A/B 对比）
       for (const file of paths) {
@@ -319,28 +463,55 @@ async function main () {
       // 所以按 chunkSize 分段调用。
       scanned = paths.length
       const chunkCount = Math.ceil(paths.length / opts.chunkSize)
-      for (let c = 0; c < chunkCount; c++) {
-        const from = c * opts.chunkSize
-        const to = Math.min(paths.length - 1, from + opts.chunkSize - 1)
-        const listFile = path.join(workDir, `ocr_list_${c}.txt`)
-        await fs.writeFile(listFile, paths.slice(from, to + 1).join('\n'), 'utf8')
-        const { stdout } = await runProcess(ocrExe, ['--quiet', '--models', modelsDir, '--list', listFile])
-        let cur = null
-        for (const line of stdout.split(/\r?\n/)) {
-          if (!line) continue
-          if (line.startsWith('F\t')) { cur = line.slice(2); continue }
-          if (!cur) continue
-          addRow(cur, line)
+      // 并发跑多个分块进程：单个 kfocr 实例只喂 60 张（批长拐点），此时进程内并行度用不满，
+      // 多进程才吃得下 CPU。实测 720 帧（过滤后 ~160 张推理）：1 路 13.2s → 4 路 3.8s，
+      // 且成片逐字节不变（rows 会按 (slot,t) 重排，判定不受调度顺序影响）。
+      const autoJobs = Math.max(1, Math.min(4, Math.floor(os.availableParallelism?.() ?? os.cpus().length) / 4))
+      const jobs = Math.max(1, Math.min(opts.ocrJobs || autoJobs, chunkCount))
+      let next = 0
+      let finished = 0
+      const worker = async () => {
+        for (;;) {
+          const c = next++
+          if (c >= chunkCount) return
+          const from = c * opts.chunkSize
+          const to = Math.min(paths.length - 1, from + opts.chunkSize - 1)
+          const listFile = path.join(workDir, `ocr_list_${c}.txt`)
+          await fs.writeFile(listFile, paths.slice(from, to + 1).join('\n'), 'utf8')
+          const { stdout, stderr } = await runProcess(ocrExe, [...ocrFlags, '--list', listFile])
+          let cur = null
+          for (const line of stdout.split(/\r?\n/)) {
+            if (!line) continue
+            if (line.startsWith('F\t')) { cur = line.slice(2); continue }
+            if (!cur) continue
+            addRow(cur, line)
+          }
+          // 每个分块进程各报一条汇总（推理/跳过张数），这里加起来，避免只显示最后一块
+          for (const m of stderr.matchAll(/^\[filter\] 推理 (\d+) 张  跳过 (\d+) 张（空槽 (\d+) \/ 帧间重复 (\d+)）/gm)) {
+            filterStats.ran += Number(m[1])
+            filterStats.skipped += Number(m[2])
+            filterStats.empty += Number(m[3])
+            filterStats.dup += Number(m[4])
+          }
+          finished++
+          const done = Math.min(finished * opts.chunkSize, paths.length)
+          const pct = 10 + 55.0 * done / Math.max(1, paths.length)
+          emit('progress', { pct: psRound(pct, 1), text: `OCR ${done}/${paths.length}` })
         }
-        const done = Math.min(to + 1, paths.length)
-        const pct = 10 + 55.0 * done / Math.max(1, paths.length)
-        emit('progress', { pct: psRound(pct, 1), text: `OCR ${done}/${paths.length}` })
       }
+      await Promise.all(Array.from({ length: jobs }, worker))
+      // 并发时行序由到达顺序决定，而这会影响「自动推断本机 ID」的平票结果；
+      // 按 (slot, t) 排一遍就回到 PS 引擎的遍历顺序，两个引擎才能稳定给出同一个 ID。
+      rows.sort((a, b) => (a.slot - b.slot) || (a.t - b.t))
     }
 
     await fs.writeFile(rowsFile, JSON.stringify(rows, null, 2), 'utf8')
     const ocrSeconds = (Date.now() - swOcr) / 1000
-    note(`   识别 ${scanned} 张，得到 ${rows.length} 行文本，OCR 耗时 ${ocrSeconds.toFixed(1)}s（单张 ${Math.round((ocrSeconds * 1000) / Math.max(1, scanned))}ms）`)
+    note(`   识别 ${scanned} 张，得到 ${rows.length} 行文本，OCR 耗时 ${ocrSeconds.toFixed(1)}s（${Math.round((ocrSeconds * 1000) / Math.max(1, scanned))}ms/张，按全量帧数折算）`)
+    if (filterStats.skipped > 0) {
+      note(`   前置过滤：推理 ${filterStats.ran} 张，跳过 ${filterStats.skipped} 张`
+        + `（空槽 ${filterStats.empty} / 帧间重复 ${filterStats.dup}）`)
+    }
     emit('progress', { pct: 65, text: `OCR 完成 ${scanned} 张 / ${rows.length} 行，${ocrSeconds.toFixed(1)}s` })
   }
 
@@ -420,28 +591,95 @@ async function main () {
   await fs.rm(listFile, { force: true })
   await fs.writeFile(listFile, '', 'utf8')
   const swCut = Date.now()
-  let i = 0
-  for (const sg of segs) {
-    i++
-    const dur = psRound(sg.end - sg.start, 2)
-    const clipPath = path.join(workDir, 'clips', `k${String(i).padStart(2, '0')}.mp4`)
-    note(`   #${i}  ${sg.start.toFixed(2).padStart(7)}s +${dur.toFixed(2).padStart(5)}s  ${sg.text}`)
-    await runProcess(opts.ffmpeg, [
-      '-y', '-v', 'error',
-      '-ss', String(sg.start), '-i', source, '-t', String(dur),
-      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p',
-      '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',
-      clipPath
-    ])
-    if (!(await exists(clipPath))) { note(`   !! 切片失败 ${clipPath}`); continue }
-    await fs.appendFile(listFile, `file '${clipPath.replace(/\\/g, '/')}'\n`, 'utf8')
-    const pct = segs.length > 0 ? 70 + 25.0 * i / segs.length : 95
-    emit('progress', { pct: psRound(pct, 1), text: `切片 ${i}/${segs.length}` })
+
+  // 编码参数：libx264 是默认（与 PS 引擎逐字节一致）；nvenc 快一点但同画质文件更大。
+  // 两者都按「参数确定 + 失败回退 libx264」处理，避免某台机器没有 NVENC 时整条流水线挂掉。
+  const x264Args = ['-c:v', 'libx264', '-preset', 'veryfast', '-crf', '20', '-pix_fmt', 'yuv420p']
+  const nvencArgs = ['-c:v', 'h264_nvenc', '-preset', 'p4', '-rc', 'vbr', '-cq', '24', '-b:v', '0', '-pix_fmt', 'yuv420p']
+  let encoder = opts.encoder
+  if (encoder !== 'libx264') {
+    // 探测一次就够：起一个 1 帧的空编码，失败就整轮退回 libx264
+    try {
+      await runProcess(opts.ffmpeg, [
+        '-v', 'error', '-f', 'lavfi', '-i', 'color=c=black:s=256x144:d=0.1',
+        ...nvencArgs, '-f', 'null', '-'
+      ])
+      if (encoder === 'auto') encoder = 'nvenc'
+      note(`   编码器: ${encoder === 'nvenc' ? 'h264_nvenc（硬编）' : 'libx264'}`)
+    } catch {
+      if (encoder === 'nvenc') note('   !! h264_nvenc 不可用，回退 libx264')
+      encoder = 'libx264'
+    }
+  }
+
+  const clips = [] // { index, path, dur, text }
+  for (let n = 0; n < segs.length; n++) {
+    const sg = segs[n]
+    clips.push({
+      index: n + 1,
+      dur: psRound(sg.end - sg.start, 2),
+      text: sg.text,
+      path: path.join(workDir, 'clips', `k${String(n + 1).padStart(2, '0')}.mp4`)
+    })
+  }
+  for (const c of clips) {
+    note(`   #${c.index}  ${segs[c.index - 1].start.toFixed(2).padStart(7)}s +${c.dur.toFixed(2).padStart(5)}s  ${c.text}`)
+  }
+
+  const renderClip = async (c) => {
+    try {
+      // --fast-copy：直接从最近关键帧 -c copy，零重编码（段落首尾会有最多一个 GOP 的误差）
+      const videoArgs = opts.fastCopy ? ['-c', 'copy'] : (encoder === 'nvenc' ? nvencArgs : x264Args)
+      const audioArgs = opts.fastCopy ? [] : ['-c:a', 'aac', '-b:a', '192k']
+      await runProcess(opts.ffmpeg, [
+        '-y', '-v', 'error',
+        '-ss', String(segs[c.index - 1].start), '-i', source, '-t', String(c.dur),
+        ...videoArgs, ...audioArgs, '-movflags', '+faststart',
+        c.path
+      ])
+    } catch (err) {
+      if (encoder === 'nvenc' && !opts.fastCopy) {
+        // 单片硬编失败：退回 libx264 重来，并把本轮后面的段也切回软编
+        note(`   !! #${c.index} nvenc 失败，改用 libx264（${String(err.message).split('\n')[0]}）`)
+        encoder = 'libx264'
+        await runProcess(opts.ffmpeg, [
+          '-y', '-v', 'error',
+          '-ss', String(segs[c.index - 1].start), '-i', source, '-t', String(c.dur),
+          ...x264Args, '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart',
+          c.path
+        ])
+        return
+      }
+      throw err
+    }
+  }
+
+  // 并发切片：每段都是独立 ffmpeg，串行只是历史遗留。并发数受 --cut-jobs 控制，
+  // 默认 1 = 既有行为（segments 顺序与成片字节都不变）。
+  const cutJobs = Math.max(1, Math.min(opts.cutJobs, clips.length || 1))
+  let cutNext = 0
+  let cutDone = 0
+  const cutWorker = async () => {
+    for (;;) {
+      const c = clips[cutNext++]
+      if (!c) return
+      await renderClip(c)
+      cutDone++
+      const pct = clips.length > 0 ? 70 + 25.0 * cutDone / clips.length : 95
+      emit('progress', { pct: psRound(pct, 1), text: `切片 ${cutDone}/${clips.length}` })
+    }
+  }
+  await Promise.all(Array.from({ length: cutJobs }, cutWorker))
+
+  // 拼接顺序必须按段号，不能按完成顺序
+  for (const c of clips) {
+    if (!(await exists(c.path))) { note(`   !! 切片失败 ${c.path}`); continue }
+    await fs.appendFile(listFile, `file '${c.path.replace(/\\/g, '/')}'\n`, 'utf8')
   }
 
   const reel = path.join(workDir, 'highlight_reel.mp4')
   await runProcess(opts.ffmpeg, ['-y', '-v', 'error', '-f', 'concat', '-safe', '0', '-i', listFile, '-c', 'copy', reel])
-  note(`   切片 + 拼接耗时 ${((Date.now() - swCut) / 1000).toFixed(1)}s`)
+  note(`   切片 + 拼接耗时 ${((Date.now() - swCut) / 1000).toFixed(1)}s${opts.fastCopy ? '（-c copy 无损直剪）' : ''}`)
 
   // ── kills.json（文档 §7.1 的中间接口）────────────────────────
   const meta = {

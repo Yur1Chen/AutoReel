@@ -59,7 +59,7 @@ Electron 里没有独立的 `node.exe`：Host 用 `process.execPath`（DSH 自�
 - 「用 ID 乐邦詹士 重剪刚才那条」→ 自动识别失败时显式指定
 
 模型调用工具 `auto_reel`（参数：`source` / `localId` / `waitSeconds`）。
-120 秒素材约需 1 分钟：工具默认阻塞等 45 秒，没跑完就返回作业 id，
+120 秒素材默认档约 20s：工具默认阻塞等 45 秒，没跑完就返回作业 id，
 之后用 `job_output` 收结果；会话头部的作业面板能看到实时进度，`job_kill` 可以中断。
 
 产出位置：`out/<素材名>/highlight_reel.mp4`（素材名 = 文件名去掉 `Valorant ` 前缀与 `.DVR` 后缀）。
@@ -110,9 +110,18 @@ media: 1920x1080 @60fps  profile=scaled-1920x1080  scale=0.75
     sourcePath: ''                      # 指定单个回放；空 = 回放目录里最新一条
     pre: 3.5                            # 击杀前秒数（0–10，面板最小 0.5），侧栏面板可改
     post: 1.5                           # 击杀后秒数（0–10，面板最小 0.5），侧栏面板可改
+    # 以下几项只有真的换档才需要写（默认档 = 与旧版逐字节一致的产物，见 docs/BENCHMARKS.md）
+    encoder: libx264                    # libx264（默认）| nvenc（快约 10%，同画质体积 1.7×）| auto
+    fastCopy: false                     # true = 切片 -c copy 无损直剪（9s → 0.6s，体积约 2×）
+    extract: full                       # full（默认）| keyframe（GOP≤0.5s 时才生效，抽帧快 7×）
+    ocrJobs: 0                          # 并发 kfocr 分块进程数，0 = auto（核数/4，最多 4）
+    cutJobs: 1                          # 切片并发数（实测 4 路只快 0.2s）
 ```
 
 `sourcePath` / `pre` / `post` 也能在侧栏面板里改；面板保存的是**本机覆盖值**，优先于这里的默认值。
+`encoder` / `fastCopy` / `extract` 这些速度开关只在配置文件里生效（面板不暴露，避免误操作改产物）。
+
+120 秒素材默认档端到端约 20s（旧版约 51s）；`fastCopy` + `extract: keyframe` 全开约 6s，代价见 docs/BENCHMARKS.md。
 
 ## 限制
 

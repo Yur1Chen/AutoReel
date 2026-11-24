@@ -19,7 +19,7 @@ import { listReplays, latestReplay, listReels, stemOf } from './lib/replays.js'
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '..')
 const REEL_NAME = 'highlight_reel.mp4'
-const VERSION = '0.1.0'
+const VERSION = '0.2.0'
 // webServer 的 prefix 匹配是 `pathname === prefix || startsWith(prefix + '/')`，
 // 所以注册值不能带尾斜杠；拼 URL 时才加。
 const MEDIA_ROUTE = '/autoreel/media'
@@ -94,7 +94,16 @@ function resolveConfig (raw) {
     sourcePath: pick(c.sourcePath, ''),
     pre: numberInRange(c.pre, 0, 10, 3.5),
     post: numberInRange(c.post, 0, 10, 1.5),
-    keepWork: c.keepWork === true
+    keepWork: c.keepWork === true,
+    // 速度开关（默认都是「与旧版一致」的那一档，只在配置里显式打开才换档）：
+    //   encoder=libx264 与 PS 引擎逐字节一致；nvenc 快约 10%，但同画质文件更大
+    //   fastCopy 走 -c copy 无损直剪，切片从 9s 掉到 0.6s，代价是段落对齐关键帧、体积约 2×
+    //   extract=keyframe 只解关键帧（GOP 够密时快 7×），但取样帧可能差一个 GOP，判定会有出入
+    encoder: pick(c.encoder, 'libx264'),
+    fastCopy: c.fastCopy === true,
+    extract: pick(c.extract, 'full'),
+    ocrJobs: Math.floor(positive(c.ocrJobs, 0)),
+    cutJobs: Math.floor(positive(c.cutJobs, 1))
   }
 }
 
@@ -347,7 +356,12 @@ export function apply (ctx, config) {
       ocrExe: cfg.ocrExe,
       // kfocr 只认 --models 参数或 TACK_OCR_MODELS 环境变量；两个引擎都靠这里注入
       env: cfg.modelsDir ? { ...process.env, TACK_OCR_MODELS: cfg.modelsDir } : undefined,
-      keepWork: cfg.keepWork
+      keepWork: cfg.keepWork,
+      encoder: cfg.encoder,
+      fastCopy: cfg.fastCopy,
+      extract: cfg.extract,
+      ocrJobs: cfg.ocrJobs,
+      cutJobs: cfg.cutJobs
     }, {
       onEvent: (event) => applyEvent(rec, event, job),
       onLog: (line) => {
@@ -547,7 +561,7 @@ export function apply (ctx, config) {
       '从 NVIDIA 即时回放里按击杀信息栏 OCR 自动剪出击杀集锦（Valorant）。',
       '抽帧 → OCR → 重建击杀事件 → 切片 → 拼接，产出一个 highlight_reel.mp4。',
       '本机玩家 ID 默认自动识别；识别不出来会报错，此时用 localId 显式指定。',
-      '耗时长（120s 素材约 1 分钟），默认阻塞到 45s，没跑完就返回作业 id，用 job_output 继续收。'
+      '耗时长（120s 素材默认档约 20s，全开快档约 6s），默认阻塞到 45s，没跑完就返回作业 id，用 job_output 继续收。'
     ].join(''),
     parameters: {
       type: 'object',

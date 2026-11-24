@@ -7,7 +7,8 @@
 可拖动的播放器和「打开目录」；右侧栏面板可以改回放目录 / 输出目录 / 击杀前后秒数，然后直接「剪这条回放」。
 
 产出固定是 `out/<素材名>/highlight_reel.mp4`。例如一条 120s 的 2K 录像（5 次击杀、4 段）→
-成片 25.02s / 54.8 MB，端到端约 58s。实测数据见 [docs/BENCHMARKS.md](docs/BENCHMARKS.md)。
+成片 25.02s / 54.8 MB，端到端约 **20s**（瓶颈已从 OCR 转到重编码）。
+实测数据与各加速开关的取舍见 [docs/BENCHMARKS.md](docs/BENCHMARKS.md)。
 
 ## 功能
 
@@ -17,6 +18,8 @@
 - **按屏幕占位重建 killfeed**：复活后再杀、跨回合重名、同屏多条都不会漏剪或重复剪；
 - **连杀并段 + 段间不重叠**：同一场交战只出一段，成片里不会出现同一行击杀条两次；
 - **默认不依赖 PowerShell**：JS 引擎编排，OCR 走自带的 `kfocr.exe`（Rust + rten）；
+- **不做无用的 OCR**：空槽帧在推理前就被像素判据跳过，连续同帧直接复用上一次结果 ——
+  720 帧里通常只有 ~160 帧真需要推理，OCR 从 32s 降到 3s，成片逐字节不变；
 - **四种入口**：对话工具 `auto_reel`、工具卡片、右侧栏面板、命令行。
 
 ## 安装（DSH 插件）
@@ -62,6 +65,7 @@ $env:TACK_OCR_MODELS = 'D:\path\to\models'      # 需含 det.rten / rec.rten / p
 node scripts\highlight.mjs --source '<...>.DVR.mp4' --release
 pwsh -File scripts\highlight.ps1 -Source '<...>.DVR.mp4' -Release
 # 常用开关：--pre/--post（默认 3.5/1.5）、--models、--out、--roi、--keep-work、--reuse
+# 更快：--fast-copy（切片 9s→0.6s，体积约 2×）| --extract keyframe（抽帧 9s→1.2s，±0.5s 对齐）
 ```
 
 完整参数（含 A/B 开关、批长、ROI 覆盖）见 [plugin/docs/DETAIL.md](plugin/docs/DETAIL.md) 和脚本头注释。
@@ -69,7 +73,8 @@ pwsh -File scripts\highlight.ps1 -Source '<...>.DVR.mp4' -Release
 ## 它是怎么工作的
 
 1. **抽帧**：ffmpeg 一次解码 + `split=3`，按 2fps 裁出击杀条 3 个槽位（12.09s / 120s 素材）；
-2. **OCR**：`kfocr --list` 分批识别（批长 60），同时顺手算「行首淡黄占比」判断本机玩家；
+2. **OCR**：`kfocr --list` 分批识别（批长 60），先把空槽与连续同帧挡在推理之外，
+   再顺手算「行首淡黄占比」判断本机玩家；
 3. **重建**：按屏幕占位把 OCR 结果还原成击杀事件（复活、跨回合、同屏多条），再合并抖动变体；
 4. **切片 + 拼接**：每段取「击杀前后」，段间钳制不重叠，x264 重编码后 concat。
 
@@ -81,7 +86,7 @@ pwsh -File scripts\highlight.ps1 -Source '<...>.DVR.mp4' -Release
 ```
 kfocr/          OCR CLI（Rust，依赖 third_party/ 里的 Tack 快照）
 third_party/    Tack 源码最小快照（tack-ocr + punct），双许可全文随目录
-scripts/        引擎（highlight.mjs / highlight.ps1）、事件重建、合成用例、打包脚本
+scripts/        引擎（highlight.mjs / highlight.ps1）、事件重建、合成用例、OCR 阈值标定（bench-kfocr-filter.mjs）、打包脚本
 plugin/         DSH 插件：Host 工具 + 后台作业 + Client 卡片与面板
 docs/           实测数据、实现笔记、插件方案、分发待办
 out/            成片（不入库）
@@ -91,6 +96,7 @@ out/            成片（不入库）
 
 | 文档 | 内容 |
 |---|---|
+| [CHANGELOG.md](CHANGELOG.md) | 版本更新日志（0.2.0 的提速与修复、0.1.0 首发内容） |
 | [docs/BENCHMARKS.md](docs/BENCHMARKS.md) | 实测数据：端到端耗时、抽帧 A/B、批处理拐点、测量环境的坑 |
 | [docs/ENGINE-NOTES.md](docs/ENGINE-NOTES.md) | 本机 ID 推断、事件重建模型、修过的 6 个 bug、JS 移植的语义坑 |
 | [docs/PLUGIN-PLAN.md](docs/PLUGIN-PLAN.md) | 插件方案、实施状态、接口与配置的实际实现 |
