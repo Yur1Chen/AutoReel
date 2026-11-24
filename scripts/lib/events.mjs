@@ -28,6 +28,15 @@ const LEADING_NON_CJK = /^[^\u4E00-\u9FFF]+/u
 const CJK_START = /^[\u4E00-\u9FFF]/
 const ASCII_BETWEEN_CJK = /(?<=[\u4E00-\u9FFF])[0-9A-Za-z](?=[\u4E00-\u9FFF])/gu
 
+/** 行首金框的判定阈值（%）：与推断本机 ID 用的是同一个值。 */
+export const SELF_MARKER_MIN = 3.0
+/**
+ * 逐行否决的阈值（%）。故意压到很低，只用来区分「有没有金框」：
+ * 本素材 39 个真击杀行的最低值是淡入瞬间的 0.232，敌方行恒为 0.000，
+ * 所以 0.1 既能挡住敌方行，又不会把淡入那一帧真击杀丢掉。
+ */
+export const SELF_MARKER_VETO = 0.1
+
 /**
  * 判断一条 killfeed 文本是不是「本地玩家的击杀」，并返回可用于分组的归一化文本。
  *
@@ -61,12 +70,63 @@ export function normalizeKillText (text, localId) {
   key = key.replace(ASCII_BETWEEN_CJK, '')
   if (!key) return null
 
-  if (key.startsWith(id)) return key
+  // 不变量：归一化后必须还剩下受害者。真击杀 = 本机 ID + 受害者，剥完至少还剩 1 个字符；
+  // 剩下的正好只有本机 ID 时，本机是「被击杀方」——例如 `ToneAim 乐邦詹士`：
+  // ToneAim 是敌方拉丁 ID，被上面那条「剥开头非汉字噪声」整段吃掉，剩 `乐邦詹士`，
+  // 于是前缀匹配成立、受害者却是空的（BUGS #1）。这里直接判为不是本机的击杀。
+  if (key.startsWith(id)) {
+    if (key.length <= id.length) return null
+    return key
+  }
 
   if (id.length >= 3 && key.startsWith(id.slice(1))) {
-    return id.slice(0, 1) + key
+    const restored = id.slice(0, 1) + key
+    // 同理：补回首字后仍等于本机 ID，说明受害者段整个丢了（`邦詹士` → `乐邦詹士`）
+    if (restored.length <= id.length) return null
+    return restored
   }
   return null
+}
+
+/**
+ * 「行首金框」这个信号在本素材里是否可用。
+ *
+ * 金框只出现在「本机在杀手位」的行上（敌方红框、队友青框都不命中这套颜色判据），
+ * 但 ROI 没框住头像框、或 kfocr 是不支持 `--marker` 的旧构建时，所有分数都是 0——
+ * 这时如果照着 0 去否决，会把整条素材的击杀全砍掉。所以先看有没有任何一行的分数
+ * 过 `minScore`，没有就退回纯文本判定（并告警），别静默把成片剪空。
+ *
+ * @param {number[]} scores  行首淡黄占比（0-100），可以含 undefined/NaN
+ * @param {{minScore?:number,minSamples?:number}} [options]
+ */
+export function markerChannelUsable (scores, { minScore = SELF_MARKER_MIN, minSamples = 1 } = {}) {
+  let seen = 0
+  for (const s of scores ?? []) {
+    if (Number.isFinite(s) && s >= minScore) seen++
+    if (seen >= minSamples) return true
+  }
+  return false
+}
+
+/**
+ * 用行首金框逐行否决「本机击杀」候选（BUGS #1 的治本那一条）。
+ *
+ * 文本只能证明「本机 ID 出现在这一行的开头」，证明不了它就在杀手位：本机 ID 是别人名字的
+ * 前缀、或敌方拉丁 ID 被当成图标噪声剥掉，都会让「敌人杀我」看起来像「我杀人」。
+ * 金框是屏幕上的直接证据，所以这里按行再筛一遍；被否掉的原始行一并返回，方便打日志核对。
+ *
+ * @param {Array<{t:number,text:string,marker?:number}>} hits
+ * @param {{minMarker?:number}} [options]
+ * @returns {{kept:Array, dropped:Array}}
+ */
+export function dropUnmarkedHits (hits, { minMarker = SELF_MARKER_VETO } = {}) {
+  const kept = []
+  const dropped = []
+  for (const h of hits ?? []) {
+    if ((h.marker ?? 0) >= minMarker) kept.push(h)
+    else dropped.push(h)
+  }
+  return { kept, dropped }
 }
 
 /**

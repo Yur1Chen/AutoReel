@@ -61,6 +61,13 @@ $matchCases = @(
     @{ text = '乐邦詹士Mete0r4';            expect = '乐邦詹士Mete0r4';     want = $true; id = '乐邦詹士' }
     @{ text = '原神转瓦偏运动比奇堡恶霸鱼';   expect = $null; want = $false }
     @{ text = '总是泪萌萌艾斯卡诺';          expect = $null; want = $false }
+    # BUGS #1：本机在受害者位 —— 剥掉敌方拉丁 ID 后只剩本机 ID，必须判成「不是我的击杀」
+    @{ text = 'ToneAim 乐邦詹士';           expect = $null; want = $false; id = '乐邦詹士' }
+    @{ text = 'ToneAim乐邦詹士';            expect = $null; want = $false; id = '乐邦詹士' }
+    @{ text = 'IV 乐邦詹士';                expect = $null; want = $false; id = '乐邦詹士' }
+    @{ text = 'G 乐邦詹士';                 expect = $null; want = $false; id = '乐邦詹士' }
+    @{ text = '邦詹士';                     expect = $null; want = $false; id = '乐邦詹士' }
+    @{ text = '乐邦詹士';                   expect = $null; want = $false; id = '乐邦詹士' }
 )
 foreach ($c in $matchCases) {
     $useId = if ($c.ContainsKey('id')) { $c.id } else { $id }
@@ -68,6 +75,53 @@ foreach ($c in $matchCases) {
     $ok = if ($c.want) { $got -eq $c.expect } else { $null -eq $got }
     if (-not $ok) { $fail++ }
     "{0}  {1,-24} → {2}" -f $(if ($ok) { '[PASS]' } else { '[FAIL]' }), $c.text, $(if ($null -eq $got) { '(不是本机击杀)' } else { $got })
+}
+""
+# ── 行首金框：逐行否决（BUGS #1 治本 / TODO #1 撞名）──────────────────
+# 同一条文本，金框在行首才是本机的击杀；金框缺 → 敌方/队友在杀手位，一律否决。
+function New-MarkedFrames($text, $from, $to, $marker, $slot = 0) {
+    $r = @()
+    for ($t = $from; $t -le $to + 1e-9; $t += 0.5) {
+        $h = New-Hit $t $slot $text
+        $h | Add-Member -NotePropertyName marker -NotePropertyValue ([double]$marker)
+        $r += $h
+    }
+    return $r
+}
+$markerCases = @(
+    @{ name = '金框在（3.8）→ 保留 1 次'
+       hits = (New-MarkedFrames '乐邦詹士香甜小蝶' 10 12 3.8); expect = 1 }
+    @{ name = '敌方行（0.0）→ 否决'
+       hits = (New-MarkedFrames '乐邦詹士' 10 12 0.0); expect = 0 }
+    @{ name = '淡入帧（0.232）→ 保留 1 次'
+       hits = (New-MarkedFrames '乐邦詹士香甜小蝶' 10 12 0.232); expect = 1 }
+    @{ name = '缺 marker 字段 → 视作 0 → 否决'
+       hits = (New-Frames '乐邦詹士香甜小蝶' 10 12); expect = 0 }
+    @{ name = '撞名：我杀同名人（3.8）→ 1 次'
+       hits = (New-MarkedFrames '乐邦詹士乐邦詹士' 10 12 3.8); expect = 1 }
+    @{ name = '撞名：同名人杀我（0.0）→ 0 次'
+       hits = (New-MarkedFrames '乐邦詹士乐邦詹士' 10 12 0.0); expect = 0 }
+    @{ name = '撞名：敌杀别人的名字以我开头（0.0）→ 0 次'
+       hits = (New-MarkedFrames '乐邦詹士香甜小蝶' 10 12 0.0); expect = 0 }
+)
+foreach ($c in $markerCases) {
+    $split = Select-SelfKillHits -Hits $c.hits
+    $got = @(ConvertTo-KillEvents -Hits $split.kept -MergeGap 3.0 -MaxAppearance 6.0)
+    $ok = ($got.Count -eq $c.expect)
+    if (-not $ok) { $fail++ }
+    "{0}  {1,-34} 期望 {2} 实得 {3}（否决 {4} 行）" -f $(if ($ok) { '[PASS]' } else { '[FAIL]' }),
+        $c.name, $c.expect, $got.Count, @($split.dropped).Count
+}
+$channelCases = @(
+    @{ name = '有行过 3.0 → 通道可用'; scores = @(0, 0.232, 3.7); expect = $true }
+    @{ name = '全 0（ROI 没框到金框）→ 不可用'; scores = @(0, 0, 0.232); expect = $false }
+    @{ name = '没有样本 → 不可用'; scores = @(); expect = $false }
+)
+foreach ($c in $channelCases) {
+    $got = Test-SelfMarkerChannel -Scores $c.scores
+    $ok = ($got -eq $c.expect)
+    if (-not $ok) { $fail++ }
+    "{0}  {1,-34} 期望 {2} 实得 {3}" -f $(if ($ok) { '[PASS]' } else { '[FAIL]' }), $c.name, $c.expect, $got
 }
 ""
 # ── Merge-VariantEvents：同一次击杀的 OCR 变体 ─────────────────────
@@ -143,4 +197,4 @@ foreach ($c in $segCases) {
     "{0}  {1,-30} 段数 {2}（期望 {3}） 重叠={4} 末段终点={5}" -f $(if ($ok) { '[PASS]' } else { '[FAIL]' }), $c.name, $sg.Count, $c.expectSegs, $overlap, $endInfo
 }
 ""
-if ($fail -gt 0) { "失败 $fail 项"; exit 1 } else { "全部通过（事件 $($cases.Count) + 匹配 $($matchCases.Count) + 变体 $($variantCases.Count) + ID 推断 $($idCases.Count) + 分段 $($segCases.Count)）" }
+if ($fail -gt 0) { "失败 $fail 项"; exit 1 } else { "全部通过（事件 $($cases.Count) + 匹配 $($matchCases.Count) + 金框 $($markerCases.Count + $channelCases.Count) + 变体 $($variantCases.Count) + ID 推断 $($idCases.Count) + 分段 $($segCases.Count)）" }

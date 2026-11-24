@@ -281,10 +281,22 @@ if ($Reuse -and (Test-Path -LiteralPath $rowsFile)) {
     Write-Event 'progress' @{ pct = 65; text = ("OCR 完成 {0} 张 / {1} 行，{2:N1}s" -f $scanned, $rows.Count, $swOcr.Elapsed.TotalSeconds) }
 }
 
-# ── 本地玩家 ID：显式指定，或 auto 从「行首黄框」的那些行推断 ──────────
+# ── 行首金框：既用来推断本机 ID，也用来逐行否决（BUGS #1 / TODO #1）──────────
+# 本机玩家的头像框是淡黄色：「出现在行首」= 这次击杀是本机打的，「出现在行尾」= 本机被杀。
+# 敌方红框、队友青框都不命中这套颜色判据，所以它是「本机 ID 在杀手位」的直接证据，
+# 比文本顺序可靠。只对「有文本的行」采样，同一张图只算一次。
 Write-Event 'stage' @{ name = 'detect'; pct = 65; text = '重建击杀事件' }
+$markerMap = @{}
+foreach ($r in $rows) {
+    if (-not $r.text -or -not $r.path) { continue }
+    if (-not $markerMap.ContainsKey($r.path)) {
+        $markerMap[$r.path] = Get-SelfMarkerScore -ImagePath $r.path -Fraction 0.5
+    }
+}
+
+# 本地玩家 ID：显式指定，或 auto 从「行首金框」的那些行推断
 if ($LocalId -eq 'auto') {
-    $autoId = Get-AutoLocalId -Rows $rows
+    $autoId = Get-AutoLocalId -Rows $rows -MarkerMap $markerMap
     if (-not $autoId) {
         throw '无法自动判定本地玩家 ID（带标记得的击杀样本不足），请用 -LocalId <你的ID> 显式指定'
     }
@@ -293,13 +305,31 @@ if ($LocalId -eq 'auto') {
 }
 Write-Event 'localId' @{ id = $LocalId }
 
-$hits = [System.Collections.Generic.List[object]]::new()
+# 文本归一化只能证明「本机 ID 在这一行开头」，证明不了它在杀手位；金框可用时再逐行否决一遍。
+$markerOn = Test-SelfMarkerChannel -Scores @($markerMap.Values)
+if (-not $markerOn) {
+    Write-Note '   !! 行首金框不可用（ROI 没框住头像框 / 图像读不出来），本次退回纯文本判定'
+}
+$candidates = [System.Collections.Generic.List[object]]::new()
 foreach ($r in $rows) {
     $norm = Get-LocalKillText -Text $r.text -LocalId $LocalId
     if (-not $norm -or $norm.Length -lt 3) { continue }
-    $hits.Add([pscustomobject]@{ t = $r.t; slot = $r.slot; text = $norm; score = $r.score })
+    $marker = if ($markerMap.ContainsKey($r.path)) { $markerMap[$r.path] } else { 0.0 }
+    $candidates.Add([pscustomobject]@{
+        t = $r.t; slot = $r.slot; text = $norm; score = $r.score; raw = $r.text; marker = $marker
+    })
 }
-Write-Note ("   命中本地玩家击杀的行 {0} 条" -f $hits.Count)
+$split = if ($markerOn) {
+    Select-SelfKillHits -Hits $candidates
+} else {
+    [pscustomobject]@{ kept = @($candidates); dropped = @() }
+}
+$hits = @($split.kept)
+foreach ($d in @($split.dropped)) {
+    Write-Note ("   [否决] {0,7:N2}s 行首无金框  {1}" -f $d.t, ($d.raw | ConvertTo-Json -Compress))
+}
+$hint = if (@($split.dropped).Count -gt 0) { "（行首无金框否决 $(@($split.dropped).Count) 条）" } else { '' }
+Write-Note ("   命中本地玩家击杀的行 {0} 条{1}" -f $hits.Count, $hint)
 
 Write-Note "[3/4] 按屏幕占位重建 -> 击杀事件 ..."
 # 判定逻辑见 scripts/lib/events.ps1：killfeed 是队列，同一条文本可以合法地出现多次

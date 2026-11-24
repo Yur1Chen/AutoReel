@@ -47,10 +47,20 @@ function Get-LocalKillText {
     $key = $key -replace '(?<=[\p{IsCJKUnifiedIdeographs}])[0-9A-Za-z](?=[\p{IsCJKUnifiedIdeographs}])', ''
     if (-not $key) { return $null }
 
-    if ($key.StartsWith($id)) { return $key }
+    # 不变量：归一化后必须还剩下受害者。真击杀 = 本机 ID + 受害者，剥完至少还剩 1 个字符；
+    # 剩下的正好只有本机 ID 时，本机是「被击杀方」——例如 `ToneAim 乐邦詹士`：
+    # ToneAim 是敌方拉丁 ID，被上面那条「剥开头非汉字噪声」整段吃掉，剩 `乐邦詹士`，
+    # 于是前缀匹配成立、受害者却是空的（BUGS #1）。这里直接判为不是本机的击杀。
+    if ($key.StartsWith($id)) {
+        if ($key.Length -le $id.Length) { return $null }
+        return $key
+    }
 
     if ($id.Length -ge 3 -and $key.StartsWith($id.Substring(1))) {
-        return $id.Substring(0, 1) + $key
+        $restored = $id.Substring(0, 1) + $key
+        # 同理：补回首字后仍等于本机 ID，说明受害者段整个丢了（`邦詹士` → `乐邦詹士`）
+        if ($restored.Length -le $id.Length) { return $null }
+        return $restored
     }
     return $null
 }
@@ -113,6 +123,13 @@ function Merge-VariantEvents {
 #
 # 实测（2026.10.13 素材，ROI 放宽到 760px 后）：本机击杀行左区黄占比 5.5%–，本机死亡行
 # 右区 7.4%–，其余绝大多数为 0，阈值取 3% 即可分开。
+
+# 行首金框的判定阈值（%）：推断本机 ID 与逐行否决共用同一个值。
+$script:SelfMarkerMinScore = 3.0
+# 逐行否决的阈值（%）。故意压到很低，只用来区分「有没有金框」：
+# 本素材 39 个真击杀行的最低值是淡入瞬间的 0.232，敌方行恒为 0.000，
+# 所以 0.1 既能挡住敌方行，又不会把淡入那一帧真击杀丢掉。
+$script:SelfMarkerVeto = 0.1
 
 # 计算一张击杀条裁剪图左端（行首头像框）的淡黄像素占比。
 function Get-SelfMarkerScore {
@@ -192,20 +209,49 @@ function Get-LocalIdFromTexts {
 }
 
 # 收集「行首黄框」的行，再推断本机 ID；样本不足或前缀不可信时返回 $null。
+# -MarkerMap（路径 -> 占比）可由调用方预先算好，省掉每行重算一遍像素。
 function Get-AutoLocalId {
     param(
         $Rows,
         [double] $MinScore = 3.0,
         [double] $WindowFraction = 0.5,
-        [int]    $MinSamples = 2
+        [int]    $MinSamples = 2,
+        $MarkerMap = $null
     )
     $texts = [System.Collections.Generic.List[string]]::new()
     foreach ($r in $Rows) {
         if (-not $r.text -or -not $r.path) { continue }
-        if ((Get-SelfMarkerScore -ImagePath $r.path -Fraction $WindowFraction) -lt $MinScore) { continue }
+        $score = if ($MarkerMap -and $MarkerMap.ContainsKey($r.path)) {
+            $MarkerMap[$r.path]
+        } else {
+            Get-SelfMarkerScore -ImagePath $r.path -Fraction $WindowFraction
+        }
+        if ($score -lt $MinScore) { continue }
         $texts.Add($r.text)
     }
     return Get-LocalIdFromTexts -Texts $texts -MinSamples $MinSamples
+}
+
+# 「行首金框」这个信号在本素材里是否可用。
+#
+# 金框只出现在「本机在杀手位」的行上（敌方红框、队友青框都不命中这套颜色判据），
+# 但 ROI 没框住头像框、或图像读不出来时，所有分数都是 0——这时如果照着 0 去否决，
+# 会把整条素材的击杀全砍掉。所以先看有没有任何一行的分数过 -MinScore，
+# 没有就退回纯文本判定（并告警），别静默把成片剪空。
+function Test-SelfMarkerChannel {
+    param(
+        $Scores,
+        [double] $MinScore = 3.0,
+        [int]    $MinSamples = 1
+    )
+    $seen = 0
+    foreach ($s in @($Scores)) {
+        if ($null -ne $s -and [double]$s -ge $MinScore) {
+            $seen++
+            if ($seen -ge $MinSamples) { return $true }
+        }
+    }
+    return $false
 }
 
 # 由击杀事件生成切片区间。
@@ -247,6 +293,25 @@ function New-HighlightSegments {
         if (($segs[$i].end - $segs[$i + 1].start) -gt 1e-9) { $segs[$i].end = $segs[$i + 1].start }
     }
     return @($segs)
+}
+
+# 用行首金框逐行否决「本机击杀」候选（BUGS #1 的治本那一条）。
+#
+# 文本只能证明「本机 ID 出现在这一行的开头」，证明不了它就在杀手位：本机 ID 是别人名字的
+# 前缀、或敌方拉丁 ID 被当成图标噪声剥掉，都会让「敌人杀我」看起来像「我杀人」。
+# 金框是屏幕上的直接证据，所以这里按行再筛一遍；被否掉的原始行一并返回，方便打日志核对。
+function Select-SelfKillHits {
+    param(
+        $Hits,
+        [double] $MinMarker = 0.1
+    )
+    $kept = [System.Collections.Generic.List[object]]::new()
+    $dropped = [System.Collections.Generic.List[object]]::new()
+    foreach ($h in @($Hits)) {
+        $m = if ($null -ne $h.marker) { [double]$h.marker } else { 0.0 }
+        if ($m -ge $MinMarker) { $kept.Add($h) } else { $dropped.Add($h) }
+    }
+    return [pscustomobject]@{ kept = @($kept); dropped = @($dropped) }
 }
 
 function ConvertTo-KillEvents {

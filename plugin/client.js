@@ -21,6 +21,8 @@ window.__ModuleLoader__.load({
     const API = '/autoreel/api'
     const MEDIA = '/autoreel/media'
     const MAX_KILLS = 8
+    // 受害者栏为空时的占位（BUGS #1：别让空字符串渲染成空白栏，看着像界面坏了）
+    const VICTIM_PLACEHOLDER = '（未识别受害者）'
 
     function basename (p) {
       if (typeof p !== 'string' || !p) return ''
@@ -326,9 +328,13 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(timer)
       }, [revealState])
 
+      // 文本是「本机 ID + 受害者」连写，切掉本机 ID 就是受害者。两种空值都要给占位符，
+      // 否则那一栏渲染成空白，看起来像界面坏了（BUGS #1 的连带修复）：
+      //   ① 整条为空（没有文本）；② 只剩本机 ID —— 理论上引擎已经不会把这种行当击杀了。
       const victimOf = (text) => {
-        if (typeof text !== 'string') return ''
-        return localId && text.startsWith(localId) ? text.slice(localId.length) : text
+        if (typeof text !== 'string' || text.length === 0) return VICTIM_PLACEHOLDER
+        if (localId && text.startsWith(localId)) return text.slice(localId.length) || VICTIM_PLACEHOLDER
+        return text
       }
 
       const revealButton = mediaUrl

@@ -11,6 +11,8 @@ import {
   mergeVariantEvents,
   normalizeKillText,
   localIdFromTexts,
+  dropUnmarkedHits,
+  markerChannelUsable,
   highlightSegments
 } from './lib/events.mjs'
 import { roiFor } from './lib/roi.mjs'
@@ -65,13 +67,50 @@ const matchCases = [
   { text: '奇堡恶霸鱼搞事早把爱玩机瞄', expect: '比奇堡恶霸鱼搞事早把爱玩机瞄' },
   { text: '乐邦詹士Mete0r4', expect: '乐邦詹士Mete0r4', id: '乐邦詹士' },
   { text: '原神转瓦偏运动比奇堡恶霸鱼', expect: null },
-  { text: '总是泪萌萌艾斯卡诺', expect: null }
+  { text: '总是泪萌萌艾斯卡诺', expect: null },
+  // BUGS #1：本机在受害者位 —— 剥掉敌方拉丁 ID 后只剩本机 ID，必须判成「不是我的击杀」
+  { text: 'ToneAim 乐邦詹士', expect: null, id: '乐邦詹士' },
+  { text: 'ToneAim乐邦詹士', expect: null, id: '乐邦詹士' },
+  { text: 'IV 乐邦詹士', expect: null, id: '乐邦詹士' },
+  { text: 'G 乐邦詹士', expect: null, id: '乐邦詹士' },
+  { text: '邦詹士', expect: null, id: '乐邦詹士' },
+  { text: '乐邦詹士', expect: null, id: '乐邦詹士' }
 ]
 for (const c of matchCases) {
   const got = normalizeKillText(c.text, c.id ?? defId)
   const ok = got === c.expect
   if (!ok) failed++
   console.log(`${ok ? '[PASS]' : '[FAIL]'}  ${c.text.padEnd(24)} → ${got === null ? '(不是本机击杀)' : got}`)
+}
+console.log()
+
+// ── 行首金框：逐行否决（BUGS #1 治本 / TODO #1 撞名）────────────────
+// 同一条文本，金框在行首才是本机的击杀；金框缺 → 敌方/队友在杀手位，一律否决。
+const marked = (rows, marker) => rows.map(r => ({ ...r, marker }))
+const markerCases = [
+  { name: '金框在（3.8）→ 保留 1 次', hits: marked(frames('乐邦詹士香甜小蝶', 10, 12), 3.8), expect: 1 },
+  { name: '敌方行（0.0）→ 否决', hits: marked(frames('乐邦詹士', 10, 12), 0.0), expect: 0 },
+  { name: '淡入帧（0.232）→ 保留 1 次', hits: marked(frames('乐邦詹士香甜小蝶', 10, 12), 0.232), expect: 1 },
+  { name: '缺 marker 字段 → 视作 0 → 否决', hits: frames('乐邦詹士香甜小蝶', 10, 12), expect: 0 },
+  { name: '撞名：我杀同名人（3.8）→ 1 次', hits: marked(frames('乐邦詹士乐邦詹士', 10, 12), 3.8), expect: 1 },
+  { name: '撞名：同名人杀我（0.0）→ 0 次', hits: marked(frames('乐邦詹士乐邦詹士', 10, 12), 0.0), expect: 0 },
+  { name: '撞名：敌杀别人的名字以我开头（0.0）→ 0 次', hits: marked(frames('乐邦詹士香甜小蝶', 10, 12), 0.0), expect: 0 }
+]
+for (const c of markerCases) {
+  const { kept, dropped } = dropUnmarkedHits(c.hits)
+  const got = killEvents(kept, { mergeGap: 3.0, maxAppearance: 6.0 })
+  report(got.length === c.expect, c.name, c.expect, `${got.length}（否决 ${dropped.length} 行）`)
+}
+const channelCases = [
+  { name: '有行过 3.0 → 通道可用', scores: [0, 0.232, 3.7], expect: true },
+  { name: '全 0（ROI 没框到金框）→ 不可用', scores: [0, 0, 0.232], expect: false },
+  { name: '没有样本 → 不可用', scores: [], expect: false }
+]
+for (const c of channelCases) {
+  const got = markerChannelUsable(c.scores)
+  const ok = got === c.expect
+  if (!ok) failed++
+  console.log(`${ok ? '[PASS]' : '[FAIL]'}  ${c.name.padEnd(34)} 期望 ${c.expect} 实得 ${got}`)
 }
 console.log()
 
@@ -184,6 +223,6 @@ if (failed > 0) {
   console.log(`失败 ${failed} 项`)
   process.exit(1)
 } else {
-  console.log(`全部通过（事件 ${killCases.length} + 匹配 ${matchCases.length} + 变体 ${variantCases.length} + ID 推断 ${idCases.length} + 分段 ${segCases.length} + 取整/ROI ${ratioCases.length + roiCases.length}）`)
+  console.log(`全部通过（事件 ${killCases.length} + 匹配 ${matchCases.length} + 金框 ${markerCases.length + channelCases.length} + 变体 ${variantCases.length} + ID 推断 ${idCases.length} + 分段 ${segCases.length} + 取整/ROI ${ratioCases.length + roiCases.length}）`)
 }
 

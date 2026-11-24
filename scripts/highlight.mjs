@@ -41,8 +41,10 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   autoLocalId,
+  dropUnmarkedHits,
   highlightSegments,
   killEvents,
+  markerChannelUsable,
   mergeVariantEvents,
   normalizeKillText
 } from './lib/events.mjs'
@@ -342,28 +344,33 @@ async function main () {
     emit('progress', { pct: 65, text: `OCR 完成 ${scanned} 张 / ${rows.length} 行，${ocrSeconds.toFixed(1)}s` })
   }
 
-  // ── 本地玩家 ID：显式指定，或 auto 从「行首黄框」的那些行推断 ──────────
+  // ── 行首金框：既用来推断本机 ID，也用来逐行否决（BUGS #1 / TODO #1）─────────
+  // 本机玩家的头像框是淡黄色：「出现在行首」= 这次击杀是本机打的，「出现在行尾」= 本机被杀。
+  // 敌方红框、队友青框都不命中这套颜色判据，所以它是「本机 ID 在杀手位」的直接证据，
+  // 比文本顺序可靠。kfocr --marker 只做像素采样（不加载模型），对「有文本的行」全量算一次。
   emit('stage', { name: 'detect', pct: 65, text: '重建击杀事件' })
+  const markerPaths = [...new Set(rows.filter(r => r.text && r.path).map(r => r.path))]
+  const markerMap = new Map()
+  if (markerPaths.length > 0) {
+    const listFile = path.join(workDir, 'marker_list.txt')
+    await fs.writeFile(listFile, markerPaths.join('\n'), 'utf8')
+    const { stdout } = await runProcess(ocrExe, ['--quiet', '--marker', '0.5', '--list', listFile])
+    for (const line of stdout.split(/\r?\n/)) {
+      if (!line.startsWith('M\t')) continue
+      const [, file, score] = line.split('\t')
+      markerMap.set(file, Number(score))
+    }
+  }
+
+  // 本地玩家 ID：显式指定，或 auto 从「行首金框」的那些行推断
   let localId = opts.localId
   if (localId === 'auto') {
-    // 只对「有文本的行」采样，和 PS 的 Get-AutoLocalId 一致；kfocr --marker 只解码不 OCR
-    const candidates = [...new Set(rows.filter(r => r.text && r.path).map(r => r.path))]
-    const markerMap = new Map()
-    if (candidates.length > 0) {
-      const listFile = path.join(workDir, 'marker_list.txt')
-      await fs.writeFile(listFile, candidates.join('\n'), 'utf8')
-      const { stdout } = await runProcess(ocrExe, ['--quiet', '--marker', '0.5', '--list', listFile])
-      for (const line of stdout.split(/\r?\n/)) {
-        if (!line.startsWith('M\t')) continue
-        const [, file, score] = line.split('\t')
-        markerMap.set(file, Number(score))
-      }
-    }
-    const autoId = autoLocalId(rows, p => markerMap.get(p) ?? 0)
-    if (candidates.length > 0 && markerMap.size === 0) {
+    // 只对「有文本的行」采样，和 PS 的 Get-AutoLocalId 一致
+    if (markerPaths.length > 0 && markerMap.size === 0) {
       // 旧版 kfocr 把 --marker 当成图片路径，stdout 不会有 M 行；点名让人重建，别只报「样本不足」
       throw new Error('kfocr 没有输出 --marker 结果（需要带 --marker 的新构建：cd kfocr && cargo build --release --offline）')
     }
+    const autoId = autoLocalId(rows, p => markerMap.get(p) ?? 0)
     if (!autoId) {
       throw new Error('无法自动判定本地玩家 ID（带标记得的击杀样本不足），请用 --local-id <你的ID> 显式指定')
     }
@@ -372,13 +379,26 @@ async function main () {
   }
   emit('localId', { id: localId })
 
-  const hits = []
+  // 文本归一化只能证明「本机 ID 在这一行开头」，证明不了它在杀手位；金框可用时再逐行否决一遍。
+  const markerOn = markerChannelUsable([...markerMap.values()])
+  if (!markerOn) {
+    note('   !! 行首金框不可用（ROI 没框住头像框 / kfocr 不支持 --marker），本次退回纯文本判定')
+  }
+  const candidates = []
   for (const r of rows) {
     const norm = normalizeKillText(r.text, localId)
     if (!norm || norm.length < 3) continue
-    hits.push({ t: r.t, slot: r.slot, text: norm, score: r.score })
+    candidates.push({
+      t: r.t, slot: r.slot, text: norm, score: r.score, raw: r.text, marker: markerMap.get(r.path) ?? 0
+    })
   }
-  note(`   命中本地玩家击杀的行 ${hits.length} 条`)
+  const { kept: hits, dropped } = markerOn
+    ? dropUnmarkedHits(candidates)
+    : { kept: candidates, dropped: [] }
+  for (const d of dropped) {
+    note(`   [否决] ${d.t.toFixed(2).padStart(7)}s 行首无金框  ${JSON.stringify(d.raw)} → ${JSON.stringify(d.text)}`)
+  }
+  note(`   命中本地玩家击杀的行 ${hits.length} 条${dropped.length > 0 ? `（行首无金框否决 ${dropped.length} 条）` : ''}`)
 
   // ── 3/4 按屏幕占位重建 → 击杀事件 ──────────────────────────────
   note('[3/4] 按屏幕占位重建 -> 击杀事件 ...')

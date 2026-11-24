@@ -1,12 +1,12 @@
 {
-  "at": "2026-11-18T04:08:13.182Z",
+  "at": "2026-11-23T15:24:11.577Z",
   "failed": 0,
   "report": [
     {
       "source": "Valorant 2025.09.14 - 10.48.16.04.DVR.mp4",
       "ok": true,
-      "psSeconds": 52,
-      "jsSeconds": 8,
+      "psSeconds": 50,
+      "jsSeconds": 9,
       "localId": "夜色冷",
       "kills": 5,
       "segments": 4,
@@ -16,8 +16,8 @@
     {
       "source": "Valorant 2025.09.21 - 17.16.07.08.DVR.mp4",
       "ok": true,
-      "psSeconds": 54,
-      "jsSeconds": 7,
+      "psSeconds": 47,
+      "jsSeconds": 6,
       "localId": "夜色冷",
       "kills": 5,
       "segments": 2,
@@ -27,7 +27,7 @@
     {
       "source": "Valorant 2026.10.13 - 19.52.39.02.DVR.mp4",
       "ok": true,
-      "psSeconds": 56,
+      "psSeconds": 48,
       "jsSeconds": 7,
       "localId": "比奇堡恶霸",
       "kills": 7,
@@ -38,7 +38,7 @@
     {
       "source": "Valorant 2026.11.11 - 23.18.09.02.DVR.mp4",
       "ok": true,
-      "psSeconds": 51,
+      "psSeconds": 43,
       "jsSeconds": 4,
       "localId": "乐邦詹士",
       "kills": 4,
@@ -49,7 +49,7 @@
     {
       "source": "Valorant 2026.11.11 - 23.18.37.03.DVR.mp4",
       "ok": true,
-      "psSeconds": 15,
+      "psSeconds": 13,
       "jsSeconds": 3,
       "localId": "乐邦詹士",
       "kills": 3,
@@ -60,8 +60,8 @@
     {
       "source": "Valorant 2026.11.11 - 23.21.53.04.DVR.mp4",
       "ok": true,
-      "psSeconds": 56,
-      "jsSeconds": 9,
+      "psSeconds": 52,
+      "jsSeconds": 8,
       "localId": "乐邦詹士",
       "kills": 5,
       "segments": 4,
