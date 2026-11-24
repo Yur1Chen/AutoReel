@@ -34,7 +34,7 @@
 | 后台作业 + 进度 | ✅ | `ctx.jobs`，作业面板可见；`job_output` 取到完整 JSON 结果 |
 | HTTP 路由 | ✅ | health 全绿；media 支持 Range（206）；traversal 403；library/runs 正常 |
 | ROI 按分辨率自适应 | ✅ | ffprobe 读源画面 → `scale=高度/1440` 等比缩放 + 贴右边缘；1080p 实测与 1440p 击杀时间点完全一致；`-Roi` / 工具 `roi` 参数可覆盖 |
-| 分发包 | ✅ | `scripts/build-plugin.ps1` → `dist/auto-reel-0.1.0.tgz`（27 MB，自带引擎/`kfocr.exe`/模型）；解包后只用包内资产跑通完整素材 |
+| 分发包 | ✅ | `scripts/build-plugin.ps1` → `dist/auto-reel-0.2.0.tgz`（约 28 MB，自带引擎/`kfocr.exe`/模型）；解包后只用包内资产跑通完整素材 |
 | Client 工具卡片 | ✅ | 已实测：进度、击杀两列、16:9 播放器、「打开目录」都正常；支持 HMR 热替换 |
 | 判定逻辑 JS 化（引擎 B） | ✅ | `scripts/highlight.mjs` + `kfocr --marker`；48 项合成用例、6 条素材金样（localId/kills/segments 逐条一致、成片 SHA256 相同）；插件支持 `engine: auto|js|ps`（auto 优先 js、JS 产出击杀前失败才回落 ps）。2026-11-18 重启后实测：health 全绿、`engine: js`，89 MB 素材 3 杀 / 2 段 / 12.4s 出片，成片 SHA256 与金样一致 |
 | 右侧栏面板（设置 + 直接剪） | ✅ | 0.1.0：回放目录/文件、输出目录、击杀前/后秒数可改；目录可「浏览…」调用系统对话框；保存到 `%LOCALAPPDATA%\AutoReel\settings.json`，即时生效 |

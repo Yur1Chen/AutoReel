@@ -139,7 +139,7 @@ tack-core = { git = "https://github.com/Yur1Chen/Tack", rev = "<同一个提交>
 - **CI**：[`.github/workflows/ci.yml`](../.github/workflows/ci.yml) —— windows-latest，两个 job：
   `js-tests` 跑 `test-events` / `test-host` / `test-client`（不依赖录像与 OCR），
   `kfocr-build` 用 `cargo build --release` 证明源码可构建并上传 `kfocr.exe` 产物。
-- **版本**：全仓统一 `0.1.0`（package.json / `plugin/index.js` 的 `VERSION` / 打包脚本）。
+- **版本**：全仓统一（`plugin/package.json` / `plugin/index.js` 的 `VERSION` / `scripts/build-plugin.ps1` 的 `$version`），当前 `0.2.0`；每个版本在 [CHANGELOG.md](../CHANGELOG.md) 记一节，Release 正文直接引用。
 
 ### 还要做
 
@@ -163,15 +163,15 @@ tack-core = { git = "https://github.com/Yur1Chen/Tack", rev = "<同一个提交>
 node scripts\test-events.mjs; node scripts\test-host.mjs; node scripts\test-client.mjs
 
 # 2. 打包（需要模型目录；没有就加 -NoModels）
-pwsh scripts\build-plugin.ps1                 # → dist/auto-reel-0.1.0.tgz（27.1 MB）
+pwsh scripts\build-plugin.ps1                 # → dist/auto-reel-0.2.0.tgz（约 28 MB）
 
 # 3. 提交 + 打标签
-git add -A; git commit -m "release: v0.1.0"
-git tag v0.1.0
+git add -A; git commit -m "release: v0.2.0"
+git tag v0.2.0
 git push origin main --tags
 
-# 4. 在 GitHub 建 Release（v0.1.0），上传两个资产：
-#    dist/auto-reel-0.1.0.tgz
+# 4. 在 GitHub 建 Release（v0.2.0），正文用 CHANGELOG.md 的 0.2.0 一节，上传两个资产：
+#    dist/auto-reel-0.2.0.tgz
 #    同一份复制成 auto-reel.tgz   ← 让 /releases/latest/download/auto-reel.tgz 成为稳定地址
 
 # 5. 验证"填地址即装"

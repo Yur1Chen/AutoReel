@@ -29,7 +29,7 @@ $dist = Join-Path $repo 'dist'
 $stage = Join-Path $dist 'stage'
 $pkg = Join-Path $stage 'package'
 
-$version = '0.1.0'
+$version = '0.2.0'
 
 function Copy-Tree([string]$From, [string]$To) {
     New-Item -ItemType Directory -Force -Path $To | Out-Null
@@ -197,6 +197,10 @@ __MODELS_NOTE__
         sourcePath: ''                     # 空 = 回放目录里最新一条
         pre: 3.5                           # 击杀前秒数（0-10），侧栏面板可改
         post: 1.5                          # 击杀后秒数（0-10），侧栏面板可改
+        # 速度开关（默认档的成片与旧版逐字节一致，只在不追求这一点时才换档）
+        encoder: libx264                   # libx264 | nvenc（快约 10%，同画质体积 1.7×）| auto
+        fastCopy: false                    # true = 切片 -c copy 无损直剪（9s → 0.6s，体积约 2×）
+        extract: full                      # full | keyframe（GOP≤0.5s 时抽帧快 7×，取样帧差 ±1 帧）
 '@
 $readme = $readme.Replace('__MODELS_NOTE__', $modelsNote)
 Write-Utf8 (Join-Path $pkg 'README.md') $readme
